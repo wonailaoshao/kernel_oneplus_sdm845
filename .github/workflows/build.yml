@@ -1,0 +1,65 @@
+name: Build KernelSU for OnePlus 6
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+        with:
+          ref: thirteen
+
+      - name: Setup Build Environment (最强环境劫持)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev libncurses-dev git-core libgnutls28-dev python-is-python3 gcc-multilib zlib1g-dev gcc-9 g++-9
+          
+          # 【核武级操作】：直接劫持系统的默认编译器，让它全局变成老版本！
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 100
+          sudo update-alternatives --install /usr/bin/cc cc /usr/bin/gcc-9 100
+          sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-9 100
+          
+          # 打印一下版本，确认劫持成功
+          gcc --version 
+
+      - name: Pull Toolchains
+        run: |
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9 -b lineage-19.1 toolchain64
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9 -b lineage-19.1 toolchain32
+
+      - name: Cloak KernelSU (底层隐身装甲)
+        run: |
+          echo "抹除 KernelSU 特征..."
+          find KernelSU -type f -name "*.[ch]" -exec sed -i 's/KernelSU/MyShield/g' {} +
+          find KernelSU -type f -name "*.[ch]" -exec sed -i 's/ksu_/mys_/g' {} +
+
+      - name: Compile Kernel
+        run: |
+          export PATH=$(pwd)/toolchain64/bin:$(pwd)/toolchain32/bin:$PATH
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          
+          # 系统已经是纯正的老环境了，直接用最干净的命令编译，绝不报错
+          make O=out ARCH=arm64 enchilada_defconfig
+          make O=out ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE CROSS_COMPILE_ARM32=$CROSS_COMPILE_ARM32 -j$(nproc)
+
+      - name: Package with AnyKernel3
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3.git
+          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
+            cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+          else
+            cp out/arch/arm64/boot/Image.gz AnyKernel3/
+          fi
+          cd AnyKernel3
+          zip -r ../KernelSU-OnePlus6.zip ./*
+
+      - name: Upload Result
+        uses: actions/upload-artifact@v4
+        with:
+          name: KernelSU-Flashable-Zip
+          path: KernelSU-OnePlus6.zip
